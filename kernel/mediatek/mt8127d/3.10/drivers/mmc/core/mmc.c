@@ -691,8 +691,6 @@ MMC_DEV_ATTR(enhanced_area_offset, "%llu\n",
 MMC_DEV_ATTR(enhanced_area_size, "%u\n", card->ext_csd.enhanced_area_size);
 MMC_DEV_ATTR(raw_rpmb_size_mult, "%#x\n", card->ext_csd.raw_rpmb_size_mult);
 MMC_DEV_ATTR(rel_sectors, "%#x\n", card->ext_csd.rel_sectors);
-MMC_DEV_ATTR(lifetime_est_a, "%#x\n", card->ext_csd.raw_dev_lifetime_est_a);
-MMC_DEV_ATTR(lifetime_est_b, "%#x\n", card->ext_csd.raw_dev_lifetime_est_b);
 
 static struct attribute *mmc_std_attrs[] = {
 	&dev_attr_cid.attr,
@@ -714,8 +712,6 @@ static struct attribute *mmc_std_attrs[] = {
 #ifdef CONFIG_MMC_SAMSUNG_SMART
 	&dev_attr_samsung_smart.attr,
 #endif /* CONFIG_MMC_SAMSUNG_SMART */
-	&dev_attr_lifetime_est_a.attr,
-	&dev_attr_lifetime_est_b.attr,
 	NULL,
 };
 
@@ -1302,10 +1298,9 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 		log_to_metrics(ANDROID_LOG_INFO, LMK_METRIC_TAG, buf);
 
 		snprintf(buf, VITALS_LIFETIME_DATA_LEN,
-			"SYSTEM_BSP_DIAG:emmc_health:fgtracking=false;DV;1,key=0x%x;DV;1,Timer=1.0;TI;1,unit=count;DV;1,"
-			"metadata=0x%x!{\"d\"#{\"ManfID\"#\"0x%x\"$\"LifetimeTypeA\"#\"0x%x\"$\"LifetimeTypeB\"#\"0x%x\"}};DV;1:HI",
-			card->ext_csd.raw_dev_lifetime_est_b, card->ext_csd.raw_dev_lifetime_est_a, card->cid.manfid,
-			card->ext_csd.raw_dev_lifetime_est_a, card->ext_csd.raw_dev_lifetime_est_b);
+			"SYSTEM_BSP_DIAG:emmc_health:fgtracking=false;DV;1,Timer=1.0;TI;1,unit=count;DV;1,"
+			"metadata=!{\"d\"#{\"ManfID\"#\"0x%x\"$\"LifetimeTypeA\"#\"0x%x\"$\"LifetimeTypeB\"#\"0x%x\"}};DV;1:HI",
+			card->cid.manfid, card->ext_csd.raw_dev_lifetime_est_a, card->ext_csd.raw_dev_lifetime_est_b);
 		log_to_vitals(ANDROID_LOG_INFO, VITALS_DOMAIN, buf);
 
                 pr_info("%s", buf);

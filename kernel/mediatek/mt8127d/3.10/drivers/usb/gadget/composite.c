@@ -1264,25 +1264,6 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 	pr_debug("[XLOG_DEBUG][USB][COM]%s bRequest=0x%X\n",
 		__func__, ctrl->bRequest);
 
-	/*
-	 * CVE: CVE-2022-20227
-	 */
-	if (w_length > USB_COMP_EP0_BUFSIZ) {
-		if (ctrl->bRequestType == USB_DIR_OUT) {
-			goto done;
-		} else {
-			/* Cast away the const, we are going to overwrite on purpose. */
-			__le16 *temp = (__le16 *)&ctrl->wLength;
-			*temp = cpu_to_le16(USB_COMP_EP0_BUFSIZ);
-			w_length = USB_COMP_EP0_BUFSIZ;
-		}
-	}
-
-	if (!cdev) {
-		pr_err("usb composite setup invalid device handle\n");
-		return -EINVAL;
-	}
-	req = cdev->req;
 	/* partial re-init of the response message; the function or the
 	 * gadget might need to intercept e.g. a control-OUT completion
 	 * when we delegate to it.
