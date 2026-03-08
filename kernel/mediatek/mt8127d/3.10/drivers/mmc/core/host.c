@@ -486,19 +486,13 @@ struct mmc_host *mmc_alloc_host(int extra, struct device *dev)
 	INIT_DELAYED_WORK(&host->metrics_delay_work,
 				mmc_host_metrics_work);
 #endif /* CONFIG_AMAZON_METRICS_LOG */
-
-#ifdef CONFIG_AMAZON_METRICS_LOG
-	INIT_DELAYED_WORK(&host->metrics_delay_work,
-			  mmc_host_metrics_work_for_hynix);
-#endif
-
 	spin_lock_init(&host->lock);
 	init_waitqueue_head(&host->wq);
 	wake_lock_init(&host->detect_wake_lock, WAKE_LOCK_SUSPEND,
 		kasprintf(GFP_KERNEL, "%s_detect", mmc_hostname(host)));
 	INIT_DELAYED_WORK(&host->detect, mmc_rescan);
 #ifdef MMC_ENABLED_EMPTY_QUEUE_FLUSH
-	host->flush_info.wq = create_singlethread_workqueue("flush_wq");
+	host->flush_info.wq = create_singlethread_workqueue("flush_wq");     
 	INIT_DELAYED_WORK(&host->flush_info.idle_time_dw, mmc_start_idle_time_flush);
 	host->flush_info.time_to_start_flush_ms = MMC_IDLE_FLUSH_TIME_MS;
 #endif

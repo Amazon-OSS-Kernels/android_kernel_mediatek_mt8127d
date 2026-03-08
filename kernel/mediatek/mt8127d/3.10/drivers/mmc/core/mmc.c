@@ -698,6 +698,41 @@ static int mmc_can_ext_csd(struct mmc_card *card)
 	return (card && card->csd.mmca_vsn > CSD_SPEC_VER_3);
 }
 
+#ifdef CONFIG_AMAZON_METRICS_LOG
+static void mmc_metrics(struct mmc_card *card)
+{
+	char *buf;
+	buf = vmalloc(VITALS_LIFETIME_DATA_LEN * sizeof(char));
+	if(buf){
+		snprintf(buf, METRICS_LIFETIME_DATA_LEN,
+			"emmc:info:est_life_time_type_a_%x=1;CT;1:NR", card->ext_csd.raw_dev_lifetime_est_a);
+		log_to_metrics(ANDROID_LOG_INFO, LMK_METRIC_TAG, buf);
+
+		snprintf(buf, METRICS_LIFETIME_DATA_LEN,
+			"emmc:info:est_life_time_type_b_%x=1;CT;1:NR", card->ext_csd.raw_dev_lifetime_est_b);
+		log_to_metrics(ANDROID_LOG_INFO, LMK_METRIC_TAG, buf);
+
+		if(card->ext_csd.raw_dev_lifetime_est_a == 0xb || card->ext_csd.raw_dev_lifetime_est_b == 0xb) {
+			snprintf(buf, METRICS_LIFETIME_DATA_LEN, "lk1nigk5:vyot/2/0c330411::status=expired;SY,_deviceId=;SY:");
+			log_to_metrics(ANDROID_LOG_INFO, LMK_METRIC_TAG, buf);
+		}
+
+		snprintf(buf, VITALS_LIFETIME_DATA_LEN,
+			"SYSTEM_BSP_DIAG:emmc_health:fgtracking=false;DV;1,key=0x%x;DV;1,Timer=1.0;TI;1,unit=count;DV;1,"
+			"metadata=0x%x!{\"d\"#{\"ManfID\"#\"0x%x\"$\"LifetimeTypeA\"#\"0x%x\"$\"LifetimeTypeB\"#\"0x%x\"}};DV;1:HI",
+			card->ext_csd.raw_dev_lifetime_est_b, card->ext_csd.raw_dev_lifetime_est_a, card->cid.manfid,
+			card->ext_csd.raw_dev_lifetime_est_a, card->ext_csd.raw_dev_lifetime_est_b);
+		log_to_vitals(ANDROID_LOG_INFO, VITALS_DOMAIN, buf);
+
+                pr_info("%s", buf);
+
+		vfree(buf);
+	} else {
+		printk("allocate metrics buf error for emmc");
+	}
+}
+#endif
+
 static ssize_t mmc_life_time_est_a_show(struct device *dev,
                                         struct device_attribute *attr,
                                         char *buf)
@@ -797,6 +832,9 @@ static ssize_t mmc_life_time_show(struct device *dev,
 	card->ext_csd.raw_dev_lifetime_est_b =
 		ext_csd[EXT_CSD_DEV_LIFETIME_EST_B];
 
+#ifdef CONFIG_AMAZON_METRICS_LOG
+	mmc_metrics(card);
+#endif
 	kfree(ext_csd);
 	mmc_release_host(card->host);
 
@@ -1237,67 +1275,6 @@ static void metrics_delaywork_queue(struct mmc_host *host)
 				msecs_to_jiffies(5000));
 }
 #endif /* CONFIG_AMAZON_METRICS_LOG */
-
-#ifdef CONFIG_AMAZON_METRICS_LOG
-void mmc_host_metrics_work_for_hynix(struct work_struct *work)
-{
-	struct mmc_host *host = container_of(work, struct mmc_host,
-					     metrics_delay_work.work);
-	char *buf = NULL;
-	int err;
-
-	struct mmc_card *card = host->card;
-	u8 *ext_csd = NULL;
-
-	err = mmc_get_ext_csd(card, &ext_csd);
-	if (err)
-		goto free_ext;
-
-	err = mmc_read_ext_csd(card, ext_csd);
-	if (err)
-		goto free_ext;
-
-	buf = vmalloc(METRICS_LIFETIME_DATA_LEN * sizeof(char));
-	if (buf) {
-		snprintf(buf, METRICS_LIFETIME_DATA_LEN,
-			 "emmc:info:est_life_time_type_a_%x=1;CT;1:NR", card->ext_csd.raw_dev_lifetime_est_a);
-		log_to_metrics(ANDROID_LOG_INFO, LMK_METRIC_TAG, buf);
-
-		snprintf(buf, METRICS_LIFETIME_DATA_LEN,
-			 "emmc:info:est_life_time_type_b_%x=1;CT;1:NR", card->ext_csd.raw_dev_lifetime_est_b);
-		log_to_metrics(ANDROID_LOG_INFO, LMK_METRIC_TAG, buf);
-
-		if (card->ext_csd.raw_dev_lifetime_est_a == 0xb || card->ext_csd.raw_dev_lifetime_est_b == 0xb) {
-			snprintf(buf, METRICS_LIFETIME_DATA_LEN,
-				 "lk1nigk5:vyot/2/0c330411::status=expired;SY,_deviceId=;SY:");
-			log_to_metrics(ANDROID_LOG_INFO, LMK_METRIC_TAG, buf);
-		}
-
-		snprintf(buf, VITALS_LIFETIME_DATA_LEN,
-			 "SYSTEM_BSP_DIAG:emmc_health:fgtracking=false;DV;1,key=0x%x;DV;1,Timer=1.0;TI;1,unit=count;DV;1,"
-			 "metadata=0x%x!{\"d\"#{\"ManfID\"#\"0x%x\"$\"LifetimeTypeA\"#\"0x%x\"$\"LifetimeTypeB\"#\"0x%x\"}};DV;1:HI",
-			 card->ext_csd.raw_dev_lifetime_est_b, card->ext_csd.raw_dev_lifetime_est_a, card->cid.manfid,
-			 card->ext_csd.raw_dev_lifetime_est_a, card->ext_csd.raw_dev_lifetime_est_b);
-		log_to_vitals(ANDROID_LOG_INFO, VITALS_DOMAIN, buf);
-
-		pr_info("%s", buf);
-
-		vfree(buf);
-	} else {
-		printk("allocate metrics buf error for emmc");
-	}
-
-free_ext:
-	mmc_free_ext_csd(ext_csd);
-}
-
-static void metrics_delaywork_queue_for_hynix(struct mmc_host *host)
-{
-	/* delay 15min to output metrics */
-	queue_delayed_work(system_nrt_wq, &host->metrics_delay_work,
-			   msecs_to_jiffies(15 * 60 * 1000));
-}
-#endif
 
 /*
  * Handle the detection and initialisation of a card.
@@ -2172,13 +2149,9 @@ int mmc_attach_mmc(struct mmc_host *host)
 	metrics_delaywork_queue(host);
 #endif /* CONFIG_AMAZON_METRICS_LOG */
 
-#ifdef CONFIG_AMAZON_METRICS_LOG
-	metrics_delaywork_queue_for_hynix(host);
-#endif
-
 	mmc_release_host(host);
 	err = mmc_add_card(host->card);
-
+ 
 	if ((host->caps2 & MMC_CAP2_POWEROFF_NOTIFY) && (host->card->ext_csd.rev >= 6) && (host->card->quirks & MMC_QUIRK_PON))
 	{
 		if (host->card->ext_csd.rev >= 6) {
