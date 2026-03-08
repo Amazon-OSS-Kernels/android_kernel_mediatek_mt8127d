@@ -434,7 +434,6 @@ static long vcodec_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned 
     VAL_VCODEC_CPU_OPP_LIMIT_T rCpuOppLimit;
     VAL_INT32_T temp_nr_cpu_ids;
     VAL_POWER_T rPowerParam;
-    VAL_UINT32_T handle = 0, handle_id = 0;
 #if 0
     VCODEC_DRV_CMD_QUEUE_T rDrvCmdQueue;
     P_VCODEC_DRV_CMD_T cmd_queue = VAL_NULL;
@@ -543,7 +542,6 @@ static long vcodec_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned 
                 return -EFAULT;
             }
 
-            handle = (VAL_UINT32_T)rHWLock.pvHandle;
             MFV_LOGD("LOCKHW eDriverType = %d\n", rHWLock.eDriverType);
             eValRet = VAL_RESULT_INVALID_ISR;
             if (rHWLock.eDriverType == VAL_DRIVER_TYPE_MP4_DEC ||
@@ -578,14 +576,8 @@ static long vcodec_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned 
                     mutex_unlock(&DecHWLockEventTimeoutLock);
 
                     mutex_lock(&VdecHWLock);
-                    handle_id = pmem_user_v2p_video(handle);
-                    if (handle_id == 0) {
-                        MFV_LOGE("[error] handle is invalid,handle:%d\n", handle);
-                        mutex_unlock(&VdecHWLock);
-                        return -EFAULT;
-                    }
                     // one process try to lock twice
-                    if (grVcodecDecHWLock.pvHandle == (VAL_VOID_T*)handle_id) {
+                    if (grVcodecDecHWLock.pvHandle == (VAL_VOID_T*)pmem_user_v2p_video((unsigned int)rHWLock.pvHandle)) {
                         MFV_LOGE("[WARNING] one decoder instance try to lock twice, may cause lock HW timeout, so reset power/irq!! instance = 0x%x, CurrentTID = %d\n",
                                             grVcodecDecHWLock.pvHandle, current->pid);
                         vdec_power_off();
@@ -640,13 +632,7 @@ static long vcodec_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned 
                     if (grVcodecDecHWLock.pvHandle == 0) // No one holds dec hw lock now
                     {
                         gu4VdecLockThreadId = current->pid;
-                        handle_id = pmem_user_v2p_video(handle);
-                        if (handle_id == 0) {
-                            MFV_LOGE("[error] handle is invalid,handle:%d\n", handle);
-                            mutex_unlock(&VdecHWLock);
-                            return -EFAULT;
-                        }
-                        grVcodecDecHWLock.pvHandle = (VAL_VOID_T*)handle_id;
+                        grVcodecDecHWLock.pvHandle = (VAL_VOID_T*)pmem_user_v2p_video((unsigned int)rHWLock.pvHandle);
                         grVcodecDecHWLock.eDriverType = rHWLock.eDriverType;
                         eVideoGetTimeOfDay(&grVcodecDecHWLock.rLockedTime, sizeof(VAL_TIME_T));
 
@@ -697,6 +683,18 @@ static long vcodec_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned 
                             grVcodecDecHWLock.rLockedTime.u4Sec, grVcodecDecHWLock.rLockedTime.u4uSec,
                             rCurTime.u4Sec, rCurTime.u4uSec
                             );
+
+                        // 2012/12/16. Cheng-Jung Never steal hardware lock
+                        if (0)
+                        //if (u4TimeInterval >= rHWLock.u4TimeoutMs)
+                        {
+                            grVcodecDecHWLock.pvHandle = (VAL_VOID_T*)pmem_user_v2p_video((unsigned int)rHWLock.pvHandle);
+                            grVcodecDecHWLock.eDriverType = rHWLock.eDriverType;
+                            eVideoGetTimeOfDay(&grVcodecDecHWLock.rLockedTime, sizeof(VAL_TIME_T));
+                            bLockedHW = VAL_TRUE;
+                            vdec_power_on();
+                            // TODO: Error handling, VDEC break, reset?
+                        }
                     }
                     mutex_unlock(&VdecHWLock);
                     spin_lock_irqsave(&LockDecHWCountLock, ulFlagsLockHW);
@@ -755,13 +753,7 @@ static long vcodec_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned 
 
                     mutex_lock(&VencHWLock);
                     // one process try to lock twice
-                    handle_id = pmem_user_v2p_video(handle);
-                    if (handle_id == 0) {
-                        MFV_LOGE("[error] handle is invalid,handle:%d\n", handle);
-                        mutex_unlock(&VencHWLock);
-                        return -EFAULT;
-                    }
-                    if (grVcodecEncHWLock.pvHandle == (VAL_VOID_T*)handle_id) {
+                    if (grVcodecEncHWLock.pvHandle == (VAL_VOID_T*)pmem_user_v2p_video((unsigned int)rHWLock.pvHandle)) {
                         MFV_LOGE("[WARNING] one encoder instance try to lock twice, may cause lock HW timeout!! instance = 0x%x, CurrentTID = %d, type:%d\n",
                             grVcodecEncHWLock.pvHandle, current->pid, rHWLock.eDriverType);
                     }
@@ -783,14 +775,14 @@ static long vcodec_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned 
                                 ++u4VencLockTimeOutCount;
                                 if (u4VencLockTimeOutCount > 30)
                                 {
-                                    MFV_LOGE("VCODEC_LOCKHW - ID %d  fail, someone locked HW time out more than 30 times %x, %x, %x, type:%d\n", current->pid, grVcodecEncHWLock.pvHandle, handle_id, handle, rHWLock.eDriverType);
+                                    MFV_LOGE("VCODEC_LOCKHW - ID %d  fail, someone locked HW time out more than 30 times %x, %x, %x, type:%d\n", current->pid, grVcodecEncHWLock.pvHandle, pmem_user_v2p_video((unsigned int)rHWLock.pvHandle), rHWLock.pvHandle, rHWLock.eDriverType);
                                     mutex_unlock(&VencHWLock);
                                     return -EFAULT;
                                 }
 
                                 if (rHWLock.u4TimeoutMs == 0)
                                 {
-                                    MFV_LOGE("VCODEC_LOCKHW - ID %d  fail, someone locked HW already %x, %x, %x, type:%d\n", current->pid, grVcodecEncHWLock.pvHandle, handle_id, handle, rHWLock.eDriverType);
+                                    MFV_LOGE("VCODEC_LOCKHW - ID %d  fail, someone locked HW already %x, %x, %x, type:%d\n", current->pid, grVcodecEncHWLock.pvHandle, pmem_user_v2p_video((unsigned int)rHWLock.pvHandle), rHWLock.pvHandle, rHWLock.eDriverType);
                                     mutex_unlock(&VencHWLock);
                                     return -EFAULT;
                                 }
@@ -809,13 +801,7 @@ static long vcodec_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned 
                         if (rHWLock.eDriverType == VAL_DRIVER_TYPE_H264_ENC ||
                             rHWLock.eDriverType == VAL_DRIVER_TYPE_JPEG_ENC)
                         {
-                            handle_id = pmem_user_v2p_video(handle);
-                            if (handle_id == 0) {
-                                MFV_LOGE("[error] handle is invalid,handle:%d\n", handle);
-                                mutex_unlock(&VencHWLock);
-                                return -EFAULT;
-                            }
-                            grVcodecEncHWLock.pvHandle = (VAL_VOID_T*)handle_id;
+                            grVcodecEncHWLock.pvHandle = (VAL_VOID_T*)pmem_user_v2p_video((unsigned int)rHWLock.pvHandle);
                             MFV_LOGD("[LOG][VCODEC_LOCKHW] No process use HW, so current process can use HW, handle = 0x%x\n", grVcodecEncHWLock.pvHandle);
                             grVcodecEncHWLock.eDriverType = rHWLock.eDriverType;
                             eVideoGetTimeOfDay(&grVcodecEncHWLock.rLockedTime, sizeof(VAL_TIME_T));
@@ -847,10 +833,10 @@ static long vcodec_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned 
 
                         MFV_LOGD("someone use enc HW, and check timeout value\n");
                         MFV_LOGD("LockInstance = 0x%x, CurrentInstance = 0x%x, CurrentTID = %d, TimeInterval(ms) = %d, TimeOutValue(ms)) = %d\n",
-                            grVcodecEncHWLock.pvHandle, pmem_user_v2p_video(handle), current->pid, u4TimeInterval, rHWLock.u4TimeoutMs);
+                            grVcodecEncHWLock.pvHandle, pmem_user_v2p_video((unsigned int)rHWLock.pvHandle), current->pid, u4TimeInterval, rHWLock.u4TimeoutMs);
 
                         MFV_LOGD("LockInstance = 0x%x, CurrentInstance = 0x%x, CurrentTID = %d, rLockedTime(s, us) = %d, %d, rCurTime(s, us) = %d, %d\n",
-                            grVcodecEncHWLock.pvHandle, pmem_user_v2p_video(handle), current->pid,
+                            grVcodecEncHWLock.pvHandle, pmem_user_v2p_video((unsigned int)rHWLock.pvHandle), current->pid,
                             grVcodecEncHWLock.rLockedTime.u4Sec, grVcodecEncHWLock.rLockedTime.u4uSec,
                             rCurTime.u4Sec, rCurTime.u4uSec
                             );
@@ -862,13 +848,7 @@ static long vcodec_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned 
                             if (rHWLock.eDriverType == VAL_DRIVER_TYPE_H264_ENC ||
                                 rHWLock.eDriverType == VAL_DRIVER_TYPE_JPEG_ENC)
                             {
-                                handle_id = pmem_user_v2p_video(handle);
-                                if (handle_id == 0) {
-                                    MFV_LOGE("[error] handle is invalid,handle:%d\n", handle);
-                                    mutex_unlock(&VencHWLock);
-                                    return -EFAULT;
-                                }
-                                grVcodecEncHWLock.pvHandle = (VAL_VOID_T*)handle_id;
+                                grVcodecEncHWLock.pvHandle = (VAL_VOID_T*)pmem_user_v2p_video((unsigned int)rHWLock.pvHandle);
                                 grVcodecEncHWLock.eDriverType = rHWLock.eDriverType;
                                 eVideoGetTimeOfDay(&grVcodecEncHWLock.rLockedTime, sizeof(VAL_TIME_T));
 
@@ -886,14 +866,14 @@ static long vcodec_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned 
 
                     if (VAL_TRUE == bLockedHW)
                     {
-                        MFV_LOGE("Lock ok grVcodecEncHWLock.pvHandle = 0x%x, va:%x, type:%d", grVcodecEncHWLock.pvHandle, handle, rHWLock.eDriverType);
+                        MFV_LOGE("Lock ok grVcodecEncHWLock.pvHandle = 0x%x, va:%x, type:%d", grVcodecEncHWLock.pvHandle, (unsigned int)rHWLock.pvHandle, rHWLock.eDriverType);
                     }
                     mutex_unlock(&VencHWLock);
                 }
 
                 if (VAL_FALSE == bLockedHW)
                 {
-                    MFV_LOGE("VCODEC_LOCKHW - ID %d  fail, someone locked HW already , %x, %x, %x, type:%d\n", current->pid, grVcodecEncHWLock.pvHandle, pmem_user_v2p_video(handle), handle, rHWLock.eDriverType);
+                    MFV_LOGE("VCODEC_LOCKHW - ID %d  fail, someone locked HW already , %x, %x, %x, type:%d\n", current->pid, grVcodecEncHWLock.pvHandle, pmem_user_v2p_video((unsigned int)rHWLock.pvHandle), rHWLock.pvHandle, rHWLock.eDriverType);
                     return -EFAULT;
                 }
 
@@ -922,7 +902,6 @@ static long vcodec_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned 
                 return -EFAULT;
             }
 
-            handle = (VAL_UINT32_T)rHWLock.pvHandle;
             MFV_LOGD("UNLOCKHW eDriverType = %d\n", rHWLock.eDriverType);
             eValRet = VAL_RESULT_INVALID_ISR;
             if (rHWLock.eDriverType == VAL_DRIVER_TYPE_MP4_DEC ||
@@ -930,13 +909,7 @@ static long vcodec_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned 
                 rHWLock.eDriverType == VAL_DRIVER_TYPE_H264_DEC)
             {
                 mutex_lock(&VdecHWLock);
-                handle_id = pmem_user_v2p_video(handle);
-                if (handle_id == 0) {
-                    MFV_LOGE("[error] handle is invalid,handle:%d\n", handle);
-                    mutex_unlock(&VdecHWLock);
-                    return -EFAULT;
-                }
-                if (grVcodecDecHWLock.pvHandle == (VAL_VOID_T*)handle_id) // Current owner give up hw lock
+                if (grVcodecDecHWLock.pvHandle == (VAL_VOID_T*)pmem_user_v2p_video((unsigned int)rHWLock.pvHandle)) // Current owner give up hw lock
                 {
                     grVcodecDecHWLock.pvHandle = 0;
                     grVcodecDecHWLock.eDriverType = VAL_DRIVER_TYPE_NONE;
@@ -954,7 +927,7 @@ static long vcodec_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned 
                 }
                 else // Not current owner
                 {
-                    MFV_LOGE("[ERROR] Not owner trying to unlock dec hardware 0x%x\n", handle_id);
+                    MFV_LOGE("[ERROR] Not owner trying to unlock dec hardware 0x%x\n", pmem_user_v2p_video((unsigned int)rHWLock.pvHandle));
                     mutex_unlock(&VdecHWLock);
                     return -EFAULT;
                 }
@@ -965,13 +938,7 @@ static long vcodec_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned 
                      rHWLock.eDriverType == VAL_DRIVER_TYPE_JPEG_ENC)
             {
                 mutex_lock(&VencHWLock);
-                handle_id = pmem_user_v2p_video(handle);
-                if (handle_id == 0) {
-                    MFV_LOGE("[error] handle is invalid,handle:%d\n", handle);
-                    mutex_unlock(&VencHWLock);
-                    return -EFAULT;
-                }
-                if (grVcodecEncHWLock.pvHandle == (VAL_VOID_T*)handle_id) // Current owner give up hw lock
+                if (grVcodecEncHWLock.pvHandle == (VAL_VOID_T*)pmem_user_v2p_video((unsigned int)rHWLock.pvHandle)) // Current owner give up hw lock
                 {
                     grVcodecEncHWLock.pvHandle = 0;
                     grVcodecEncHWLock.eDriverType = VAL_DRIVER_TYPE_NONE;
@@ -985,7 +952,7 @@ static long vcodec_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned 
                 else // Not current owner
                 {
                     // [TODO] error handling
-                    MFV_LOGE("[ERROR] Not owner trying to unlock enc hardware 0x%x, pa:%x, va:%x type:%d\n", grVcodecEncHWLock.pvHandle, handle_id, handle, rHWLock.eDriverType);
+                    MFV_LOGE("[ERROR] Not owner trying to unlock enc hardware 0x%x, pa:%x, va:%x type:%d\n", grVcodecEncHWLock.pvHandle, pmem_user_v2p_video((unsigned int)rHWLock.pvHandle), (unsigned int)rHWLock.pvHandle, rHWLock.eDriverType);
                     mutex_unlock(&VencHWLock);
                     return -EFAULT;
                 }
@@ -1083,19 +1050,13 @@ static long vcodec_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned 
                 MFV_LOGE("[ERROR] VCODEC_WAITISR, copy_from_user failed: %d\n", ret);
                 return -EFAULT;
             }
-            handle = (VAL_UINT32_T)val_isr.pvHandle;
+
             if (val_isr.eDriverType == VAL_DRIVER_TYPE_MP4_DEC ||
                 val_isr.eDriverType == VAL_DRIVER_TYPE_HEVC_DEC ||
                 val_isr.eDriverType == VAL_DRIVER_TYPE_H264_DEC)
             {
                 mutex_lock(&VdecHWLock);
-                handle_id = pmem_user_v2p_video(handle);
-                if (handle_id == 0) {
-                    MFV_LOGE("[error] handle is invalid,handle:%d\n", handle);
-                    mutex_unlock(&VdecHWLock);
-                    return -EFAULT;
-                }
-                if (grVcodecDecHWLock.pvHandle == (VAL_VOID_T*)handle_id)
+                if (grVcodecDecHWLock.pvHandle == (VAL_VOID_T*)pmem_user_v2p_video((unsigned int)val_isr.pvHandle))
                 {
                     bLockedHW = VAL_TRUE;
                 }
@@ -1128,13 +1089,7 @@ static long vcodec_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned 
             else if (val_isr.eDriverType == VAL_DRIVER_TYPE_H264_ENC)
             {
                 mutex_lock(&VencHWLock);
-                handle_id = pmem_user_v2p_video(handle);
-                if (handle_id == 0) {
-                    MFV_LOGE("[error] handle is invalid,handle:%d\n", handle);
-                    mutex_unlock(&VencHWLock);
-                    return -EFAULT;
-                }
-                if (grVcodecEncHWLock.pvHandle == (VAL_VOID_T*)handle_id)
+                if (grVcodecEncHWLock.pvHandle == (VAL_VOID_T*)pmem_user_v2p_video((unsigned int)val_isr.pvHandle))
                 {
                     bLockedHW = VAL_TRUE;
                 }
@@ -1145,7 +1100,7 @@ static long vcodec_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned 
 
                 if (bLockedHW == VAL_FALSE)
                 {
-                    MFV_LOGE("[ERROR] DO NOT have enc HWLock, so return fail pa:%x, va:%x\n", pmem_user_v2p_video(handle), handle);
+                    MFV_LOGE("[ERROR] DO NOT have enc HWLock, so return fail pa:%x, va:%x\n", pmem_user_v2p_video((unsigned int)val_isr.pvHandle), val_isr.pvHandle);
                     break;
                 }
 

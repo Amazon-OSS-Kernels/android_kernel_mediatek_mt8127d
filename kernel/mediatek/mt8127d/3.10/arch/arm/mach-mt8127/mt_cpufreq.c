@@ -192,8 +192,7 @@ static unsigned int g_cpu_power_table_num = 0;
 
 static int g_ramp_down_count = 0;
 
-static atomic_t mt_cpufreq_boost = ATOMIC_INIT(0);
-
+static bool mt_cpufreq_boost = false;
 static bool mt_cpufreq_debug = false;
 static bool mt_cpufreq_ready = false;
 static bool mt_cpufreq_pause = false;
@@ -1512,7 +1511,7 @@ static int mt_cpufreq_target(struct cpufreq_policy *policy, unsigned int target_
     /************************************************
     * DVFS keep max freq when boost is enable.
     *************************************************/
-    if(atomic_read(&mt_cpufreq_boost) > 0)
+    if(mt_cpufreq_boost == true)
     {
         freqs.new = g_max_freq_by_ptp;
         dprintk("set max freq for boost, freqs.new = %d\n", freqs.new);
@@ -2611,8 +2610,8 @@ void mt_cpufreq_enable_boost(void)
 {
 	struct cpufreq_policy *policy;
 
-	atomic_inc(&mt_cpufreq_boost);
-	dprintk("enable freq boost, mt_cpufreq_boost:%d\n", atomic_read(&mt_cpufreq_boost));
+	mt_cpufreq_boost = true;
+	dprintk("enable freq boost, mt_cpufreq_boost:%d\n", mt_cpufreq_boost);
 
 	policy = cpufreq_cpu_get(0);
 
@@ -2630,13 +2629,13 @@ no_policy:
 
 void mt_cpufreq_disable_boost(void)
 {
-	atomic_dec_if_positive(&mt_cpufreq_boost);
-	dprintk("disable freq boost: mt_cpufreq_boost:%d\n", atomic_read(&mt_cpufreq_boost));
+	mt_cpufreq_boost = false;
+	dprintk("disable freq boost: mt_cpufreq_boost:%d\n", mt_cpufreq_boost);
 }
 
 bool mt_cpufreq_get_boost(void)
 {
-	return (atomic_read(&mt_cpufreq_boost) > 0);
+	return mt_cpufreq_boost;
 }
 
 

@@ -692,6 +692,120 @@ MMC_DEV_ATTR(enhanced_area_size, "%u\n", card->ext_csd.enhanced_area_size);
 MMC_DEV_ATTR(raw_rpmb_size_mult, "%#x\n", card->ext_csd.raw_rpmb_size_mult);
 MMC_DEV_ATTR(rel_sectors, "%#x\n", card->ext_csd.rel_sectors);
 
+
+static int mmc_can_ext_csd(struct mmc_card *card)
+{
+	return (card && card->csd.mmca_vsn > CSD_SPEC_VER_3);
+}
+
+static ssize_t mmc_life_time_est_a_show(struct device *dev,
+                                        struct device_attribute *attr,
+                                        char *buf)
+{
+	struct mmc_card *card = mmc_dev_to_card(dev);
+	u8 *ext_csd = NULL;
+	int err;
+
+	mmc_claim_host(card->host);
+
+	if (!mmc_can_ext_csd(card)) {
+		mmc_release_host(card->host);
+		return 0;
+	}
+
+	err = mmc_get_ext_csd(card, &ext_csd);
+	if (err) {
+		if (ext_csd)
+			kfree(ext_csd);
+
+		mmc_release_host(card->host);
+		return err;
+	}
+
+	card->ext_csd.raw_dev_lifetime_est_a =
+		ext_csd[EXT_CSD_DEV_LIFETIME_EST_A];
+
+	kfree(ext_csd);
+	mmc_release_host(card->host);
+
+	return sprintf(buf, "0x%02x\n",
+		       card->ext_csd.raw_dev_lifetime_est_a);
+}
+static DEVICE_ATTR(lifetime_est_a, S_IRUGO, mmc_life_time_est_a_show, NULL);
+
+static ssize_t mmc_life_time_est_b_show(struct device *dev,
+                                        struct device_attribute *attr,
+                                        char *buf)
+{
+	struct mmc_card *card = mmc_dev_to_card(dev);
+	u8 *ext_csd = NULL;
+	int err;
+
+	mmc_claim_host(card->host);
+
+	if (!mmc_can_ext_csd(card)) {
+		mmc_release_host(card->host);
+		return 0;
+	}
+
+	err = mmc_get_ext_csd(card, &ext_csd);
+	if (err) {
+		if (ext_csd)
+			kfree(ext_csd);
+
+		mmc_release_host(card->host);
+		return err;
+	}
+
+	card->ext_csd.raw_dev_lifetime_est_b =
+		ext_csd[EXT_CSD_DEV_LIFETIME_EST_B];
+
+	kfree(ext_csd);
+	mmc_release_host(card->host);
+
+	return sprintf(buf, "0x%02x\n",
+		       card->ext_csd.raw_dev_lifetime_est_b);
+}
+static DEVICE_ATTR(lifetime_est_b, S_IRUGO, mmc_life_time_est_b_show, NULL);
+
+static ssize_t mmc_life_time_show(struct device *dev,
+                                  struct device_attribute *attr,
+                                  char *buf)
+{
+	struct mmc_card *card = mmc_dev_to_card(dev);
+	u8 *ext_csd = NULL;
+	int err;
+
+	mmc_claim_host(card->host);
+
+	if (!mmc_can_ext_csd(card)) {
+		mmc_release_host(card->host);
+		return 0;
+	}
+
+	err = mmc_get_ext_csd(card, &ext_csd);
+	if (err) {
+		if (ext_csd)
+			kfree(ext_csd);
+
+		mmc_release_host(card->host);
+		return err;
+	}
+
+	card->ext_csd.raw_dev_lifetime_est_a =
+		ext_csd[EXT_CSD_DEV_LIFETIME_EST_A];
+	card->ext_csd.raw_dev_lifetime_est_b =
+		ext_csd[EXT_CSD_DEV_LIFETIME_EST_B];
+
+	kfree(ext_csd);
+	mmc_release_host(card->host);
+
+	return sprintf(buf, "0x%02x 0x%02x\n",
+		       card->ext_csd.raw_dev_lifetime_est_a,
+		       card->ext_csd.raw_dev_lifetime_est_b);
+}
+static DEVICE_ATTR(life_time, S_IRUGO, mmc_life_time_show, NULL);
+
 static struct attribute *mmc_std_attrs[] = {
 	&dev_attr_cid.attr,
 	&dev_attr_csd.attr,
@@ -712,6 +826,9 @@ static struct attribute *mmc_std_attrs[] = {
 #ifdef CONFIG_MMC_SAMSUNG_SMART
 	&dev_attr_samsung_smart.attr,
 #endif /* CONFIG_MMC_SAMSUNG_SMART */
+	&dev_attr_lifetime_est_a.attr,
+	&dev_attr_lifetime_est_b.attr,
+	&dev_attr_life_time.attr,
 	NULL,
 };
 
@@ -1121,6 +1238,67 @@ static void metrics_delaywork_queue(struct mmc_host *host)
 }
 #endif /* CONFIG_AMAZON_METRICS_LOG */
 
+#ifdef CONFIG_AMAZON_METRICS_LOG
+void mmc_host_metrics_work_for_hynix(struct work_struct *work)
+{
+	struct mmc_host *host = container_of(work, struct mmc_host,
+					     metrics_delay_work.work);
+	char *buf = NULL;
+	int err;
+
+	struct mmc_card *card = host->card;
+	u8 *ext_csd = NULL;
+
+	err = mmc_get_ext_csd(card, &ext_csd);
+	if (err)
+		goto free_ext;
+
+	err = mmc_read_ext_csd(card, ext_csd);
+	if (err)
+		goto free_ext;
+
+	buf = vmalloc(METRICS_LIFETIME_DATA_LEN * sizeof(char));
+	if (buf) {
+		snprintf(buf, METRICS_LIFETIME_DATA_LEN,
+			 "emmc:info:est_life_time_type_a_%x=1;CT;1:NR", card->ext_csd.raw_dev_lifetime_est_a);
+		log_to_metrics(ANDROID_LOG_INFO, LMK_METRIC_TAG, buf);
+
+		snprintf(buf, METRICS_LIFETIME_DATA_LEN,
+			 "emmc:info:est_life_time_type_b_%x=1;CT;1:NR", card->ext_csd.raw_dev_lifetime_est_b);
+		log_to_metrics(ANDROID_LOG_INFO, LMK_METRIC_TAG, buf);
+
+		if (card->ext_csd.raw_dev_lifetime_est_a == 0xb || card->ext_csd.raw_dev_lifetime_est_b == 0xb) {
+			snprintf(buf, METRICS_LIFETIME_DATA_LEN,
+				 "lk1nigk5:vyot/2/0c330411::status=expired;SY,_deviceId=;SY:");
+			log_to_metrics(ANDROID_LOG_INFO, LMK_METRIC_TAG, buf);
+		}
+
+		snprintf(buf, VITALS_LIFETIME_DATA_LEN,
+			 "SYSTEM_BSP_DIAG:emmc_health:fgtracking=false;DV;1,key=0x%x;DV;1,Timer=1.0;TI;1,unit=count;DV;1,"
+			 "metadata=0x%x!{\"d\"#{\"ManfID\"#\"0x%x\"$\"LifetimeTypeA\"#\"0x%x\"$\"LifetimeTypeB\"#\"0x%x\"}};DV;1:HI",
+			 card->ext_csd.raw_dev_lifetime_est_b, card->ext_csd.raw_dev_lifetime_est_a, card->cid.manfid,
+			 card->ext_csd.raw_dev_lifetime_est_a, card->ext_csd.raw_dev_lifetime_est_b);
+		log_to_vitals(ANDROID_LOG_INFO, VITALS_DOMAIN, buf);
+
+		pr_info("%s", buf);
+
+		vfree(buf);
+	} else {
+		printk("allocate metrics buf error for emmc");
+	}
+
+free_ext:
+	mmc_free_ext_csd(ext_csd);
+}
+
+static void metrics_delaywork_queue_for_hynix(struct mmc_host *host)
+{
+	/* delay 15min to output metrics */
+	queue_delayed_work(system_nrt_wq, &host->metrics_delay_work,
+			   msecs_to_jiffies(15 * 60 * 1000));
+}
+#endif
+
 /*
  * Handle the detection and initialisation of a card.
  *
@@ -1136,9 +1314,6 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 	unsigned int max_dtr;
 	u32 rocr;
 	u8 *ext_csd = NULL;
-#ifdef CONFIG_AMAZON_METRICS_LOG
-	char *buf;
-#endif
 
 	BUG_ON(!host);
 	WARN_ON(!host->claimed);
@@ -1286,31 +1461,6 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 	pr_info("[%s]: Firmware Version:%llx\n", __func__, card->ext_csd.raw_firmware_version);
 	pr_info("[%s]: Device life time estimation type A:%x, life time estimation type B:%x\n", __func__,
 					card->ext_csd.raw_dev_lifetime_est_a, card->ext_csd.raw_dev_lifetime_est_b);
-#ifdef CONFIG_AMAZON_METRICS_LOG
-	buf = vmalloc(METRICS_LIFETIME_DATA_LEN * sizeof(char));
-	if(buf){
-		snprintf(buf, METRICS_LIFETIME_DATA_LEN,
-			"emmc:info:est_life_time_type_a_%x=1;CT;1:NR", card->ext_csd.raw_dev_lifetime_est_a);
-		log_to_metrics(ANDROID_LOG_INFO, LMK_METRIC_TAG, buf);
-
-		snprintf(buf, METRICS_LIFETIME_DATA_LEN,
-			"emmc:info:est_life_time_type_b_%x=1;CT;1:NR", card->ext_csd.raw_dev_lifetime_est_b);
-		log_to_metrics(ANDROID_LOG_INFO, LMK_METRIC_TAG, buf);
-
-		snprintf(buf, VITALS_LIFETIME_DATA_LEN,
-			"SYSTEM_BSP_DIAG:emmc_health:fgtracking=false;DV;1,Timer=1.0;TI;1,unit=count;DV;1,"
-			"metadata=!{\"d\"#{\"ManfID\"#\"0x%x\"$\"LifetimeTypeA\"#\"0x%x\"$\"LifetimeTypeB\"#\"0x%x\"}};DV;1:HI",
-			card->cid.manfid, card->ext_csd.raw_dev_lifetime_est_a, card->ext_csd.raw_dev_lifetime_est_b);
-		log_to_vitals(ANDROID_LOG_INFO, VITALS_DOMAIN, buf);
-
-                pr_info("%s", buf);
-
-		vfree(buf);
-	} else {
-		printk("allocate metrics buf error for emmc");
-	}
-
-#endif
 
 	/*
 	 * If enhanced_area_en is TRUE, host needs to enable ERASE_GRP_DEF
@@ -2022,9 +2172,13 @@ int mmc_attach_mmc(struct mmc_host *host)
 	metrics_delaywork_queue(host);
 #endif /* CONFIG_AMAZON_METRICS_LOG */
 
+#ifdef CONFIG_AMAZON_METRICS_LOG
+	metrics_delaywork_queue_for_hynix(host);
+#endif
+
 	mmc_release_host(host);
 	err = mmc_add_card(host->card);
- 
+
 	if ((host->caps2 & MMC_CAP2_POWEROFF_NOTIFY) && (host->card->ext_csd.rev >= 6) && (host->card->quirks & MMC_QUIRK_PON))
 	{
 		if (host->card->ext_csd.rev >= 6) {

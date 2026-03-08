@@ -19,5 +19,9 @@ void mmc_unregister_host_class(void);
 extern void mmc_host_metrics_work(struct work_struct *work);
 #endif /* CONFIG_AMAZON_METRICS_LOG */
 
+#ifdef CONFIG_AMAZON_METRICS_LOG
+extern void mmc_host_metrics_work_for_hynix(struct work_struct *work);
+#endif
+
 #endif
 
